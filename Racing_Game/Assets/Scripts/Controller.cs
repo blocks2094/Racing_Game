@@ -52,6 +52,7 @@ public class Controller : MonoBehaviour
                 wheels[i].brakeTorque = brakeTorque;
                 wheels[i].motorTorque = 0;
             }
+            rb.velocity = Vector3.Lerp(rb.velocity, Vector3.zero, Time.deltaTime * 0.5f);
         }
         else
         {
@@ -82,6 +83,20 @@ public class Controller : MonoBehaviour
         for (int i = 0; i < wheels.Length - 2; i++)
         {
             wheels[i].steerAngle = currentSteerAngle;
+        }
+        // 👇 추가할 부분: 고속 코너링 시 부드러운 궤적 보조 (Grip Assist)
+        if (speed > 10f) // 시속 10km 이상일 때만 작동 (제자리 회전 방지)
+        {
+            // 현재 자동차의 실제 이동 방향(속도)을 가져옵니다.
+            Vector3 localVelocity = transform.InverseTransformDirection(rb.velocity);
+
+            // X축(좌우로 미끄러지는 속도)을 0에 가깝게 부드럽게 깎아냅니다.
+            // 👉 맨 끝의 숫자 '3f'를 조절하여 코너링 느낌을 바꿀 수 있습니다.
+            // (1f = 현실적이고 많이 미끄러짐 / 5f = 카트라이더처럼 레일을 타듯 부드럽고 쫀득함)
+            localVelocity.x = Mathf.Lerp(localVelocity.x, 0, Time.deltaTime * 1f);
+
+            // 보정된 궤적을 다시 적용합니다.
+            rb.velocity = transform.TransformDirection(localVelocity);
         }
 
         // 👇 3. 시각적 바퀴 애니메이션 적용 함수 호출
