@@ -6,8 +6,6 @@ public class Controller : MonoBehaviour
 {
     [Header("Wheel Settings")]
     public WheelCollider[] wheels = new WheelCollider[4];
-
-    // 👇 새로 추가: 눈에 보이는 실제 바퀴 오브젝트(메쉬)를 연결할 배열
     public Transform[] wheelModels = new Transform[4];
 
     [Header("Engine & Brake")]
@@ -43,8 +41,45 @@ public class Controller : MonoBehaviour
         float speed = rb.velocity.magnitude * 3.6f;
         rb.AddForce(-transform.up * downforce * rb.velocity.magnitude);
 
-        // 1. 가속 및 브레이크 
-        if (Input.GetKey(KeyCode.Space))
+        // ==========================================
+        // 🎮 1. 입력 감지 (키보드 + 게임패드 동시 지원)
+        // ==========================================
+
+        // 왼쪽 스틱의 위/아래 기울기를 가져옵니다. (아래로 당기면 음수)
+        float verticalInput = Input.GetAxis("Vertical");
+
+        bool isAccel = Input.GetKey(KeyCode.W);
+        bool isBrake = Input.GetKey(KeyCode.Space);
+        bool isReverse = Input.GetKey(KeyCode.S);
+
+        try
+        {
+            // LT를 당기면 브레이크
+            if (Input.GetAxis("LT") > 0.1f) isBrake = true;
+
+            // RT를 당겼을 때
+            if (Input.GetAxis("RT") > 0.1f)
+            {
+                // 👇 핵심 추가: 왼쪽 스틱을 아래쪽으로 절반 이상 당긴 상태라면?
+                if (verticalInput < -0.5f)
+                {
+                    isReverse = true;  // 후진 켜기
+                    isAccel = false;   // 전진 끄기
+                }
+                else
+                {
+                    isAccel = true;    // 스틱을 안 당겼거나 위로 밀었다면 정상적으로 전진!
+                }
+            }
+        }
+        catch { /* 세팅 전 에러 방지 */ }
+
+
+        // ==========================================
+        // 🏎️ 2. 가속 및 브레이크 로직 적용
+        // ==========================================
+
+        if (isBrake)
         {
             currentTorque = 0f;
             for (int i = 0; i < wheels.Length; i++)
@@ -58,24 +93,27 @@ public class Controller : MonoBehaviour
         {
             for (int i = 0; i < wheels.Length; i++) { wheels[i].brakeTorque = 0; }
 
-            if (Input.GetKey(KeyCode.W))
+            if (isAccel) // 직진 (W키 or 스틱중립+RT)
             {
                 currentTorque = Mathf.MoveTowards(currentTorque, maxMotorTorque, accelerationRate * Time.deltaTime);
                 for (int i = 0; i < wheels.Length; i++) { wheels[i].motorTorque = currentTorque; }
             }
-            else if (Input.GetKey(KeyCode.S))
+            else if (isReverse) // 후진 (S키 or 스틱아래+RT)
             {
                 currentTorque = Mathf.MoveTowards(currentTorque, -maxMotorTorque, accelerationRate * Time.deltaTime);
                 for (int i = 0; i < wheels.Length; i++) { wheels[i].motorTorque = currentTorque; }
             }
-            else
+            else // 아무것도 안 누름
             {
                 currentTorque = Mathf.MoveTowards(currentTorque, 0f, accelerationRate * Time.deltaTime);
                 for (int i = 0; i < wheels.Length; i++) { wheels[i].motorTorque = currentTorque; }
             }
         }
 
-        // 2. 조향 
+        // ==========================================
+        // 🛞 3. 조향 (A/D 키 & 패드 왼쪽 스틱 모두 자동 지원)
+        // ==========================================
+
         float currentMaxSteer = Mathf.Lerp(maxSteerAngle, minSteerAngle, speed / maxSpeedForSteer);
         float targetSteerAngle = Input.GetAxis("Horizontal") * currentMaxSteer;
         currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteerAngle, Time.deltaTime * steerSpeed);
@@ -84,40 +122,28 @@ public class Controller : MonoBehaviour
         {
             wheels[i].steerAngle = currentSteerAngle;
         }
-        // 👇 추가할 부분: 고속 코너링 시 부드러운 궤적 보조 (Grip Assist)
-        if (speed > 10f) // 시속 10km 이상일 때만 작동 (제자리 회전 방지)
+
+        // 고속 코너링 보조 (Grip Assist)
+        if (speed > 10f)
         {
-            // 현재 자동차의 실제 이동 방향(속도)을 가져옵니다.
             Vector3 localVelocity = transform.InverseTransformDirection(rb.velocity);
-
-            // X축(좌우로 미끄러지는 속도)을 0에 가깝게 부드럽게 깎아냅니다.
-            // 👉 맨 끝의 숫자 '3f'를 조절하여 코너링 느낌을 바꿀 수 있습니다.
-            // (1f = 현실적이고 많이 미끄러짐 / 5f = 카트라이더처럼 레일을 타듯 부드럽고 쫀득함)
             localVelocity.x = Mathf.Lerp(localVelocity.x, 0, Time.deltaTime * 1f);
-
-            // 보정된 궤적을 다시 적용합니다.
             rb.velocity = transform.TransformDirection(localVelocity);
         }
 
-        // 👇 3. 시각적 바퀴 애니메이션 적용 함수 호출
+        // 시각적 바퀴 애니메이션 적용
         UpdateWheelPoses();
     }
 
-    // 👇 새로 추가된 애니메이션 처리 함수
     private void UpdateWheelPoses()
     {
         for (int i = 0; i < wheels.Length; i++)
         {
-            // 배열에 바퀴 모델이 제대로 연결되어 있는지 확인
             if (wheelModels[i] != null)
             {
                 Vector3 pos;
                 Quaternion quat;
-
-                // WheelCollider의 현재 물리적 위치와 회전 각도를 가져옴
                 wheels[i].GetWorldPose(out pos, out quat);
-
-                // 눈에 보이는 바퀴 모델의 위치와 회전값을 물리 연산 결과와 똑같이 맞춰줌
                 wheelModels[i].position = pos;
                 wheelModels[i].rotation = quat;
             }
